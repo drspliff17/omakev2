@@ -10,6 +10,18 @@ Config :: struct {
 }
 
 @(private = "file")
+// Ensures default template directory exists. Panics if it does not, and fails to be created
+ensure_default_template_directory :: proc(c: ^Config) {
+	tp := get_default_template_path()
+
+	if !os.exists(tp) do if e := os.make_directory_all(tp); e != nil do fmt.panicf("Failed to create default template directory: %v - %s", e, tp)
+	else do fmt.printfln("[INFO] Created default template directory: %s", tp)
+
+	c.template_dirs = make([]string, 1)
+	c.template_dirs[0] = tp
+}
+
+@(private = "file")
 // Returns allocated string
 get_config_path :: proc() -> string {
 	h, e := os.user_home_dir(context.allocator)
@@ -33,7 +45,7 @@ get_default_template_path :: proc() -> string {
 	s := get_config_path()
 	defer delete_string(s)
 
-	c, e := os.join_path({s, "templates"}, context.allocator)
+	c, e := os.join_path({os.dir(s), "templates"}, context.allocator)
 	if e != nil do fmt.panicf("Failed to allocate default template directory: %v", e)
 
 	return c
@@ -62,13 +74,28 @@ load_config :: proc(p: ^kvp.Parser, c: ^Config, filepath: string) -> bool {
 @(private = "file")
 validate_config :: proc(p: ^kvp.Parser, c: ^Config) -> bool {
 	err := make([dynamic]string)
-	defer delete(err)
+	defer {
+		for e in err do delete_string(e)
+		delete(err)
+	}
 
 	for k, i in c.keys do if len(k) == 0 do append(&err, fmt.aprintf("[ERROR] Invalid Key - Line: %d, expected atleast one character", i + 1))
-	for t, i in c.template_dirs do if !os.exists(t) do append(&err, fmt.aprintf("[ERROR] Invalid template directory path - Line: %d", i + 1))
+
+	if len(c.template_dirs) == 0 {
+		fmt.eprintfln("[WARN] No template directories loaded, attempting to use default...")
+		ensure_default_template_directory(c)
+	} else {
+		tk := kvp.get_cloned_token_array(p)
+		defer if len(tk) > 0 do delete(tk)
+
+		for t, i in c.template_dirs do if !os.exists(t) {
+			l: int
+			for token in tk do if token.value == t do l = token.line
+			append(&err, fmt.aprintf("[ERROR] Invalid template directory path, does not exist - Line: %d\n\t-> %s", l, t))
+		}
+	}
 
 	if len(err) == 0 do return true
-
 	for e in err do fmt.eprintfln(e)
 	return false
 }
@@ -94,7 +121,7 @@ init_config :: proc() -> ^Config {
 				return c
 			} else {
 				when ODIN_DEBUG do fmt.printfln("Returning nil for config")
-				free(c)
+				free_config(c)
 				fmt.eprintfln("[ABORTING]")
 				return nil
 			}
