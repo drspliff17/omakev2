@@ -25,4 +25,16 @@ main :: proc() {
 	c := init_config()
 	if c == nil do return
 	defer free_config(c)
+
+	td := init_template_data(c)
+	if td == nil do return
+	defer free_template_data(td)
+
+	fmt.println("TEST:")
+	for t, i in td.data do fmt.printfln("%d - Path: %s", i, t.filepath)
+
+	new, sub := parse_template_file(c, &td.data[2])
+	defer delete(new)
+
+	fmt.printfln(string(new[:]))
 }
