@@ -10,7 +10,7 @@ Config :: struct {
 }
 
 @(private = "file")
-// Ensures default template directory exists. Panics if it does not, and fails to be created
+// Ensures default template directory exists && has been assigned to Config. Panics if it does not exist, and fails to be created
 ensure_default_template_directory :: proc(c: ^Config) {
 	tp := get_default_template_path()
 
@@ -22,7 +22,7 @@ ensure_default_template_directory :: proc(c: ^Config) {
 }
 
 @(private = "file")
-// Returns allocated string
+// Returns allocated string for config file path
 get_config_path :: proc() -> string {
 	h, e := os.user_home_dir(context.allocator)
 	if e != nil do fmt.panicf("Failed to allocate user home path: %v", e)
@@ -40,7 +40,7 @@ get_config_path :: proc() -> string {
 }
 
 @(private = "file")
-// Returns allocated string
+// Returns allocated string for default template directory path
 get_default_template_path :: proc() -> string {
 	s := get_config_path()
 	defer delete_string(s)
@@ -56,8 +56,7 @@ get_default_template_path :: proc() -> string {
 get_default_config :: proc() -> ^Config {
 	tp := get_default_template_path()
 	c := new(Config)
-	c.template_dirs = make([]string, 1)
-	c.template_dirs[0] = tp
+	ensure_default_template_directory(c)
 	return c
 }
 
@@ -72,6 +71,8 @@ load_config :: proc(p: ^kvp.Parser, c: ^Config, filepath: string) -> bool {
 }
 
 @(private = "file")
+// Ensures all keys are valid, and that default template directory is applied to Config -> ensuring all template directories exist
+// Prints any errors encountered, or warnings found in Config
 validate_config :: proc(p: ^kvp.Parser, c: ^Config) -> bool {
 	err := make([dynamic]string)
 	defer {
@@ -88,11 +89,47 @@ validate_config :: proc(p: ^kvp.Parser, c: ^Config) -> bool {
 		tk := kvp.get_cloned_token_array(p)
 		defer if len(tk) > 0 do delete(tk)
 
-		for t, i in c.template_dirs do if !os.exists(t) {
-			l: int
-			for token in tk do if token.value == t do l = token.line
-			append(&err, fmt.aprintf("[ERROR] Invalid template directory path, does not exist - Line: %d\n\t-> %s", l, t))
+		for t, i in c.template_dirs {
+
+			if !os.exists(t) {
+				l: int
+				for token in tk do if token.value == t do l = token.line
+				append(
+					&err,
+					fmt.aprintf(
+						"[ERROR] Invalid template directory path, does not exist - Line: %d\n\t-> %s",
+						l,
+						t,
+					),
+				)
+				continue
+			}
+
+			fi, e := os.stat(t, context.allocator)
+			if e != nil do fmt.panicf("Failed to stat path: %s -> %v", t, e)
+			defer os.file_info_delete(fi, context.allocator)
+
+			if fi.type != .Directory {
+				l: int
+				for token in tk do if token.value == t do l = token.line
+				append(
+					&err,
+					fmt.aprintf(
+						"[ERROR] Invalid template directory path, not a directory - Line: %d\n\t-> %s",
+						l,
+						t,
+					),
+				)
+			}
+
+			if fi.size == 0 {
+				l: int
+				for token in tk do if token.value == t do l = token.line
+				fmt.eprintfln("[WARN] Template directory empty - Line: %d\n\t-> %s", l, t)
+			}
+
 		}
+
 	}
 
 	if len(err) == 0 do return true
@@ -100,7 +137,8 @@ validate_config :: proc(p: ^kvp.Parser, c: ^Config) -> bool {
 	return false
 }
 
-// Constructor
+// Constructor. If config file does not exist, returns get_default_config(). Else, attempts
+// to load config file. Prints all errors if load &&||validation fails
 init_config :: proc() -> ^Config {
 	cp := get_config_path()
 	defer delete_string(cp)
