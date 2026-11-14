@@ -7,16 +7,21 @@ import "core:strings"
 
 @(private = "file")
 Template :: struct {
-	filepath:      string,
-	name_override: string,
-	keys:          []string,
+	filepath: string,
+	keys:     []string,
 }
 
 Template_Data :: struct {
-	data: []Template,
+	data:          []Template,
+	name_override: string,
 }
 
 FileKeys :: distinct []string
+
+valid_template_name :: proc(t: string, td: ^Template_Data) -> (idx: int, ok: bool) {
+	for x, i in td.data do if os.base(x.filepath) == t do return i, true
+	return 0, false
+}
 
 // Returns allocated file keys
 get_file_keys :: proc(f: os.File_Info) -> FileKeys {
@@ -118,7 +123,6 @@ construct_template :: proc(filepath: string, keys: FileKeys) -> Template {
 // Frees allocated strings inside given Template
 free_template :: proc(t: ^Template) {
 	if len(t.filepath) > 0 do delete_string(t.filepath)
-	if len(t.name_override) > 0 do delete_string(t.name_override)
 
 	for k in t.keys do delete_string(k)
 	if len(t.keys) > 0 do delete(t.keys)
@@ -158,36 +162,35 @@ construct_template_data :: proc(c: ^Config, td: ^Template_Data) -> (ok: bool) {
 	return true
 }
 
-key_used_in_template :: proc(key: string, td: ^Template_Data) -> bool {
-	for t in td.data do for k in t.keys do if key == k do return true
+key_value_in_config :: proc(key: string, c: ^Config) -> bool {
+	for k in c.keys do if key == k.name && len(k.value) > 0 do return true
 	return false
 }
 
-key_in_config :: proc(key: string, c: ^Config) -> bool {
-	for k in c.keys do if key == k do return true
-	return false
+key_in_arg_pair :: proc(key: string, ap: ^[dynamic]ArgumentPair) -> (idx: int, ok: bool) {
+	for a, i in ap do if a.key == key do return i, true
+	return 0, false
 }
 
 init_template_data :: proc(c: ^Config) -> ^Template_Data {
 	t := new(Template_Data)
-
 	if !construct_template_data(c, t) {
 		free(t)
 		return nil
 	}
-
 	return t
 }
 
 free_template_data :: proc(td: ^Template_Data) {
 	for &t in td.data do free_template(&t)
+	if len(td.name_override) > 0 do delete_string(td.name_override)
 	delete(td.data)
 	free(td)
 }
 
 // Parses given template entry, with given array of config keywords, returns the subbed file data in bytes
 encode_template_file :: proc(
-	c: ^Config,
+	a: ^[dynamic]ArgumentPair,
 	t: ^Template,
 ) -> (
 	new_data: [dynamic]byte,
@@ -205,18 +208,18 @@ encode_template_file :: proc(
 		new_line := line
 		was_replaced := false
 
-		for k in c.keys {
-			keyF := strings.concatenate([]string{"{{", k, "}}"}, context.allocator)
+		for p in a {
+			keyF := strings.concatenate([]string{"{{", p.key, "}}"}, context.allocator)
+			defer delete_string(keyF)
+
 			if strings.contains(line, keyF) {
-				//TODO: Make way of getting current value associated with given key
-				replaced, _ := strings.replace_all(line, keyF, "CHEESE")
+				replaced, _ := strings.replace_all(new_line, keyF, p.value)
 				if was_replaced do delete_string(new_line)
 
 				new_line = replaced
 				was_replaced = true
 				was_sub = true
 			}
-			delete_string(keyF)
 		}
 
 		if was_replaced {
@@ -231,4 +234,97 @@ encode_template_file :: proc(
 	}
 
 	return new_data, was_sub
+}
+
+@(private = "file")
+encode_file_recursive :: proc(
+	a: ^[dynamic]ArgumentPair,
+	f: os.File_Info,
+	output_path: string,
+) -> bool {
+	if os.exists(output_path) {
+		fmt.eprintfln("Failed to create template. File already exists at %s", output_path)
+		return false
+	}
+
+	#partial switch f.type {
+	case .Regular:
+		t := Template {
+			filepath = f.fullpath,
+		}
+
+		data, _ := encode_template_file(a, &t)
+		defer delete(data)
+
+		if err := os.write_entire_file(output_path, data[:]); err != nil {
+			fmt.eprintfln("Failed to write %s -> %v", output_path, err)
+			return false
+		}
+
+	case .Directory:
+		if err := os.make_directory_all(output_path); err != nil {
+			fmt.eprintfln("Failed to create directory: %s -> %v", output_path, err)
+			return false
+		}
+
+		fi, err := os.read_all_directory_by_path(f.fullpath, context.allocator)
+		if err != nil {
+			fmt.eprintfln("Failed to read directory: %s -> %v", f.fullpath, err)
+			return false
+		}
+		defer {
+			for x in fi do os.file_info_delete(x, context.allocator)
+			delete(fi)
+		}
+
+		for x in fi {
+			child_output, err := os.join_path({output_path, x.name}, context.allocator)
+			if err != nil {
+				fmt.eprintfln("Failed to construct output path: %v", err)
+				return false
+			}
+			defer delete_string(child_output)
+
+			if !encode_file_recursive(a, x, child_output) {
+				return false
+			}
+		}
+
+	case:
+		fmt.eprintfln("Invalid file type. Expected Regular || Directory, got: %v", f.type)
+		return false
+	}
+
+	return true
+}
+
+// Encode given Template, using given ArgumentPair array
+encode_validated_template :: proc(
+	a: ^[dynamic]ArgumentPair,
+	t: ^Template,
+	override: string = "",
+) -> bool {
+	f, err := os.stat(t.filepath, context.allocator)
+	if err != nil {
+		fmt.eprintfln("Failed to stat file: %s -> %v", t.filepath, err)
+		return false
+	}
+	defer os.file_info_delete(f, context.allocator)
+
+	wd, e := os.get_working_directory(context.allocator)
+	if e != nil {
+		fmt.eprintfln("Failed to get working directory: %v", e)
+		return false
+	}
+	defer delete_string(wd)
+
+	name := len(override) > 0 ? override : f.name
+	output_path, oe := os.join_path({wd, name}, context.allocator)
+	if oe != nil {
+		fmt.eprintfln("Failed to construct output path: %v", oe)
+		return false
+	}
+	defer delete_string(output_path)
+
+	return encode_file_recursive(a, f, output_path)
 }

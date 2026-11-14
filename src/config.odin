@@ -4,10 +4,15 @@ import "../../lib/kvp"
 import "core:fmt"
 import "core:os"
 
+ConfigKey :: struct {
+	name:  string,
+	value: string,
+}
 
 Config :: struct {
-	keys:          []string,
-	template_dirs: []string,
+	keys:            []ConfigKey,
+	template_dirs:   []string,
+	enable_warnings: bool,
 }
 
 @(private = "file")
@@ -55,8 +60,8 @@ get_default_template_path :: proc() -> string {
 @(private = "file")
 // Returns new Config, must be freed using free_config()
 get_default_config :: proc() -> ^Config {
-	tp := get_default_template_path()
 	c := new(Config)
+	c.enable_warnings = true
 	ensure_default_template_directory(c)
 	return c
 }
@@ -81,7 +86,10 @@ validate_config :: proc(p: ^kvp.Parser, c: ^Config) -> bool {
 		delete(err)
 	}
 
-	for k, i in c.keys do if len(k) == 0 do append(&err, fmt.aprintf("[ERROR] Invalid Key - Line: %d, expected atleast one character", i + 1))
+	for k in c.keys {
+		if len(k.name) == 0 do append(&err, fmt.aprintf("[ERROR] Invalid Key: expected atleast one character for key name"))
+		if c.enable_warnings do if len(k.value) == 0 do fmt.printfln("[WARN] Key missing default value: %s", k.name)
+	}
 
 	if len(c.template_dirs) == 0 {
 		fmt.eprintfln("[WARN] No template directories loaded, attempting to use default...")
@@ -204,7 +212,8 @@ init_config :: proc() -> ^Config {
 // Free all allocated memory, owned by given ^Config
 free_config :: proc(c: ^Config) {
 	if len(c.keys) > 0 {
-		for k in c.keys do if len(k) > 0 do delete_string(k)
+		for k in c.keys do if len(k.name) > 0 do delete_string(k.name)
+		for k in c.keys do if len(k.value) > 0 do delete_string(k.value)
 		delete(c.keys)
 	}
 
