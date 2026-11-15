@@ -209,6 +209,35 @@ init_config :: proc() -> ^Config {
 	}
 }
 
+// Attempts to create default config file
+generate_default_config :: proc() -> (ok: bool) {
+	p := get_config_path()
+	defer delete_string(p)
+
+	if os.exists(p) {
+		fmt.printfln("[WARN] File already exists: %s\nAborting...", p)
+		return true
+	}
+
+	c := get_default_config()
+	defer free_config(c)
+
+	s := fmt.aprintfln(
+		"\ntemplate_dirs[0] = %s\n\nenable_warnings = %v",
+		c.template_dirs[0],
+		c.enable_warnings,
+	)
+	defer delete_string(s)
+
+	if err := os.write_entire_file(p, s); err != nil {
+		fmt.eprintfln("Failed to write default config file: %v", err)
+		return false
+	}
+
+	fmt.printfln("Created Default Config -> %s", p)
+	return true
+}
+
 // Free all allocated memory, owned by given ^Config
 free_config :: proc(c: ^Config) {
 	if len(c.keys) > 0 {

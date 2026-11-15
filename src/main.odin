@@ -26,6 +26,7 @@ omake [-h] [-l] [-c [h] ] [-n name]
 [-k name value] <template name>
 
 -h | help
+-g | gen                -> Generate default config
 -l | list               -> View valid templates
 -c | count [opt]        -> Use 'h' for subcmd
 -n | name  <value>      -> Assign Template name
@@ -103,6 +104,10 @@ main :: proc() {
 		switch arg[0] {
 		case "-h", "--help", "help":
 			print_help()
+			return
+
+		case "-g", "--gen", "gen":
+			if !generate_default_config() do os.exit(1)
 			return
 
 		case "-l", "--list", "list":
