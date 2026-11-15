@@ -42,7 +42,7 @@ omake [-n <v>] [-k <n> <v>] <template name>
               Use 'omake -c h' for more information
 ```
 
-### Key substitution
+### Basic Key Substitution
 
 Any ``Template`` file can contain keys, which are denoted by:
 
@@ -78,6 +78,73 @@ Would output:
 
 ```txt
 Here is some text, replaced with some key value
+```
+
+### Advanced Key Substitution
+
+You can additionally make use of value formatting. There are two types of formatting:
+
+```txt
+$name -> Key Reference
+%x    -> Format Flag
+```
+
+- *Note, These types may be nested, but may **not** be cyclic in nature.*
+
+A ``Key Reference`` simply inserts the corresponding value of the key ``name`` given.
+The following ``Format Flags`` are available:
+
+```txt
+%d  -> Date (DD-MM-YYYY)
+%t  -> Time (HH-MM-SS)
+%dt -> DateTime (DD-MM-YYYY HH-MM-SS)
+%n  -> Template Name / Name Override
+%b  -> Base of Working Directory
+%p  -> Full Working Directory
+```
+
+- *Note, if you would like to join multiple values, without a separating
+character, you can use the following ``${key_name}`` syntax, instead
+of ``$key_name``*
+
+**Example ``Config``:**
+
+```txt
+keys[0].name = target
+keys[0].value = src
+
+keys[1].name = bin
+keys[1].value = %n
+
+keys[2].name = path
+keys[2].value = %p/$bin
+```
+
+**Example ``Template``:**
+
+```bash
+# ~/.config/omake/templates/compile
+odin build {{target}} -out "{{bin}}" || exit 1
+[[ ! -e "~/.local/bin/{{bin}}" ]] &&  ln -s "{{path}}" "~/.local/bin/{{bin}}"
+```
+
+**Command:**
+
+```bash
+# ~/dev/Odin >
+omake -n something compile
+```
+
+- *Note, just as with basic key subbing, '-k' arguments will overwrite config
+defined defaults. Format flags && Key refs may be used here, although you may
+have to wrap the key ref in single-quotes*
+
+**Output:**
+
+```bash
+# ~/dev/Odin/something
+odin build src -out "something" || exit 1
+[[ ! -e "~/.local/bin/something" ]] &&  ln -s "~/dev/Odin/something" "~/.local/bin/something"
 ```
 
 ### Template Directories
