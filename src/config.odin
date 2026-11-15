@@ -92,7 +92,7 @@ validate_config :: proc(p: ^kvp.Parser, c: ^Config) -> bool {
 	}
 
 	if len(c.template_dirs) == 0 {
-		fmt.eprintfln("[WARN] No template directories loaded, attempting to use default...")
+		if c.enable_warnings do fmt.eprintfln("[WARN] No template directories loaded, attempting to use default...")
 		ensure_default_template_directory(c)
 	} else {
 		tk := kvp.get_cloned_token_array(p)
@@ -134,7 +134,7 @@ validate_config :: proc(p: ^kvp.Parser, c: ^Config) -> bool {
 			if fi.size == 0 {
 				l: int
 				for token in tk do if token.value == t do l = token.line
-				fmt.eprintfln("[WARN] Template directory empty - Line: %d\n\t-> %s", l, t)
+				if c.enable_warnings do fmt.eprintfln("[WARN] Template directory empty - Line: %d\n\t-> %s", l, t)
 			}
 
 		}
