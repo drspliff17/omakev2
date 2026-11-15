@@ -49,9 +49,7 @@ resolve_special_token :: proc(
 	switch token[0] {
 	case '$':
 		key := token[1:]
-		if idx, found := key_in_arg_pair(key, ap); found {
-			return strings.clone(ap[idx].value), true
-		}
+		if idx, found := key_in_arg_pair(key, ap); found do return strings.clone(ap[idx].value), true
 		return "", false
 
 	case '%':
@@ -141,9 +139,7 @@ expand_key_references :: proc(
 
 		if i > literal_start do append(&parts, val[literal_start:i])
 
-		for existing in key_stack^ {
-			if existing == key do return "", false
-		}
+		for existing in key_stack^ do if existing == key do return "", false
 
 		idx, found := key_in_arg_pair(key, ap)
 		if !found do return "", false
@@ -182,7 +178,6 @@ evaluate_special_value :: proc(
 	expanded, expanded_ok := expand_key_references(val, ap, &key_stack)
 	if !expanded_ok do return "", false
 	defer delete_string(expanded)
-
 	if len(expanded) == 0 do return strings.clone(""), true
 
 	parts := make([dynamic]string)
@@ -254,13 +249,10 @@ get_file_keys :: proc(f: os.File_Info) -> FileKeys {
 
 					if len(key) > 0 {
 						found := false
-						for existing in s {
-							if existing == key {
-								found = true
-								break
-							}
+						for existing in s do if existing == key {
+							found = true
+							break
 						}
-
 						if !found do append(&s, strings.clone(key))
 					}
 
@@ -289,11 +281,9 @@ get_file_keys :: proc(f: os.File_Info) -> FileKeys {
 
 			for str in k {
 				found := false
-				for existing in s {
-					if existing == str {
-						found = true
-						break
-					}
+				for existing in s do if existing == str {
+					found = true
+					break
 				}
 
 				if !found do append(&s, strings.clone(str))
@@ -430,7 +420,6 @@ encode_template_file :: proc(
 		} else do append(&new_data, line)
 
 		append(&new_data, "\n")
-
 	}
 
 	return new_data, was_sub
