@@ -4,6 +4,7 @@ import "core:fmt"
 import "core:os"
 import "core:slice"
 import "core:strings"
+import "core:time"
 
 @(private = "file")
 Template :: struct {
@@ -19,8 +20,70 @@ Template_Data :: struct {
 FileKeys :: distinct []string
 
 valid_template_name :: proc(t: string, td: ^Template_Data) -> (idx: int, ok: bool) {
-	for x, i in td.data do if os.base(x.filepath) == t do return i, true
+	for &x, i in td.data do if os.base(x.filepath) == t do return i, true
 	return 0, false
+}
+
+evaluate_special_value :: proc(
+	val: string,
+	c: ^Config,
+	ap: ^[dynamic]ArgumentPair,
+	t: ^Template,
+	td: ^Template_Data,
+) -> (
+	value: string,
+	ok: bool,
+) {
+	if len(val) == 0 do return "", false
+
+	v: string
+	switch val[0] {
+	case u8('$'):
+		v = val[1:]
+		if len(v) == 0 do return "", false
+		if idx, kok := key_in_arg_pair(v, ap); kok do return strings.clone(ap[idx].value), true
+		return "", false
+
+	case u8('%'):
+		v = strings.to_lower(val[1:])
+		defer delete_string(v)
+		if len(v) == 0 do return "", false
+		switch v {
+		case "b", "p":
+			wd, e := os.get_working_directory(context.allocator)
+			if e != nil do fmt.panicf("Failed get_working_directory() -> %v", e)
+			defer delete_string(wd)
+			if v == "p" do return strings.clone(wd), true
+			else do return strings.clone(os.base(wd)), true
+
+		case "d", "t", "dt":
+			ts := time.now()
+			switch v {
+			case "d":
+				b: [time.MIN_YYYY_DATE_LEN]u8
+				return strings.clone(time.to_string_dd_mm_yyyy(ts, b[:])), true
+			case "t":
+				b: [time.MIN_HMS_LEN]u8
+				return strings.clone(time.time_to_string_hms(ts, b[:])), true
+			case "dt":
+				db: [time.MIN_YYYY_DATE_LEN]u8
+				tb: [time.MIN_HMS_LEN]u8
+
+				d := time.to_string_dd_mm_yyyy(ts, db[:])
+				t := time.time_to_string_hms(ts, tb[:])
+				return fmt.aprintf("%s %s", d, t), true
+			}
+
+		case "n":
+			if len(td.name_override) == 0 do return strings.clone(os.base(t.filepath)), true
+			return strings.clone(td.name_override), true
+
+		case:
+			return "", false
+		}
+	}
+
+	return "", false
 }
 
 // Returns allocated file keys
@@ -74,11 +137,11 @@ get_file_keys :: proc(f: os.File_Info) -> FileKeys {
 		fi, err := os.read_all_directory_by_path(f.fullpath, context.allocator)
 		if err != nil do fmt.panicf("Failed to read directory: %s -> %v", f.fullpath, err)
 		defer {
-			for f in fi do os.file_info_delete(f, context.allocator)
+			for &f in fi do os.file_info_delete(f, context.allocator)
 			delete(fi)
 		}
 
-		for f in fi {
+		for &f in fi {
 			k := get_file_keys(f)
 			defer {
 				for str in k do delete_string(str)
@@ -115,7 +178,7 @@ construct_template :: proc(filepath: string, keys: FileKeys) -> Template {
 		keys     = make([]string, len(keys)),
 	}
 
-	for k, i in keys do t.keys[i] = strings.clone(k)
+	for &k, i in keys do t.keys[i] = strings.clone(k)
 	return t
 }
 
@@ -124,7 +187,7 @@ construct_template :: proc(filepath: string, keys: FileKeys) -> Template {
 free_template :: proc(t: ^Template) {
 	if len(t.filepath) > 0 do delete_string(t.filepath)
 
-	for k in t.keys do delete_string(k)
+	for &k in t.keys do delete_string(k)
 	if len(t.keys) > 0 do delete(t.keys)
 }
 
@@ -134,17 +197,17 @@ construct_template_data :: proc(c: ^Config, td: ^Template_Data) -> (ok: bool) {
 	t := make([dynamic]Template)
 	defer delete(t)
 
-	for tp in c.template_dirs {
+	for &tp in c.template_dirs {
 		fi, err := os.read_all_directory_by_path(tp, context.allocator)
 		if err != nil {
 			fmt.eprintfln("Failed to read directory: %s -> %v", tp, err)
 			continue
 		}
 		defer {
-			for f in fi do os.file_info_delete(f, context.allocator)
+			for &f in fi do os.file_info_delete(f, context.allocator)
 			delete(fi)
 		}
-		for f in fi {
+		for &f in fi {
 			keys := get_file_keys(f)
 			defer free_file_keys(keys)
 			template := construct_template(f.fullpath, keys)
@@ -162,13 +225,13 @@ construct_template_data :: proc(c: ^Config, td: ^Template_Data) -> (ok: bool) {
 	return true
 }
 
-key_value_in_config :: proc(key: string, c: ^Config) -> bool {
-	for k in c.keys do if key == k.name && len(k.value) > 0 do return true
-	return false
+key_value_in_config :: proc(key: string, c: ^Config) -> (idx: int, ok: bool) {
+	for &k, i in c.keys do if key == k.name && len(k.value) > 0 do return i, true
+	return 0, false
 }
 
 key_in_arg_pair :: proc(key: string, ap: ^[dynamic]ArgumentPair) -> (idx: int, ok: bool) {
-	for a, i in ap do if a.key == key do return i, true
+	for &a, i in ap do if a.key == key do return i, true
 	return 0, false
 }
 
@@ -273,11 +336,11 @@ encode_file_recursive :: proc(
 			return false
 		}
 		defer {
-			for x in fi do os.file_info_delete(x, context.allocator)
+			for &x in fi do os.file_info_delete(x, context.allocator)
 			delete(fi)
 		}
 
-		for x in fi {
+		for &x in fi {
 			child_output, err := os.join_path({output_path, x.name}, context.allocator)
 			if err != nil {
 				fmt.eprintfln("Failed to construct output path: %v", err)

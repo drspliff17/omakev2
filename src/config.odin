@@ -80,7 +80,7 @@ validate_config :: proc(p: ^kvp.Parser, c: ^Config) -> bool {
 		delete(err)
 	}
 
-	for k in c.keys {
+	for &k in c.keys {
 		if len(k.name) == 0 do append(&err, fmt.aprintf("[ERROR] Invalid Key: expected atleast one character for key name"))
 		if c.enable_warnings do if len(k.value) == 0 do fmt.printfln("[WARN] Key missing default value: %s", k.name)
 	}
@@ -92,7 +92,7 @@ validate_config :: proc(p: ^kvp.Parser, c: ^Config) -> bool {
 		tk := kvp.get_cloned_token_array(p)
 		defer if len(tk) > 0 do delete(tk)
 
-		for t, i in c.template_dirs {
+		for &t, i in c.template_dirs {
 			if len(t) == 0 {
 				append(
 					&err,
@@ -106,7 +106,7 @@ validate_config :: proc(p: ^kvp.Parser, c: ^Config) -> bool {
 
 			if !os.exists(t) {
 				l: int
-				for token in tk do if token.value == t do l = token.line
+				for &token in tk do if token.value == t do l = token.line
 				append(
 					&err,
 					fmt.aprintf(
@@ -124,7 +124,7 @@ validate_config :: proc(p: ^kvp.Parser, c: ^Config) -> bool {
 
 			if fi.type != .Directory {
 				l: int
-				for token in tk do if token.value == t do l = token.line
+				for &token in tk do if token.value == t do l = token.line
 				append(
 					&err,
 					fmt.aprintf(
@@ -137,14 +137,14 @@ validate_config :: proc(p: ^kvp.Parser, c: ^Config) -> bool {
 
 			if fi.size == 0 {
 				l: int
-				for token in tk do if token.value == t do l = token.line
+				for &token in tk do if token.value == t do l = token.line
 				if c.enable_warnings do fmt.eprintfln("[WARN] Template directory empty - Line: %d\n\t-> %s", l, t)
 			}
 
 		}
 
 		tfound := false
-		for t in c.template_dirs {
+		for &t in c.template_dirs {
 			if !os.exists(t) do continue
 			fi, e := os.stat(t, context.allocator)
 			if e != nil do fmt.panicf("Failed to stat path: %s -> %v", t, e)
@@ -257,8 +257,8 @@ generate_default_config :: proc() -> (ok: bool) {
 // Free all allocated memory, owned by given ^Config
 free_config :: proc(c: ^Config) {
 	if len(c.keys) > 0 {
-		for k in c.keys do if len(k.name) > 0 do delete_string(k.name)
-		for k in c.keys do if len(k.value) > 0 do delete_string(k.value)
+		for &k in c.keys do if len(k.name) > 0 do delete_string(k.name)
+		for &k in c.keys do if len(k.value) > 0 do delete_string(k.value)
 		delete(c.keys)
 	}
 

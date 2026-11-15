@@ -18,7 +18,19 @@ ArgumentPair :: struct {
 }
 
 lazy_convert :: proc(a: ConfigKey) -> ArgumentPair {
-	return ArgumentPair{key = a.name, value = a.value, source = .CONFIG}
+	return ArgumentPair {
+		key = strings.clone(a.name),
+		value = strings.clone(a.value),
+		source = .CONFIG,
+	}
+}
+
+free_argument_pairs :: proc(ap: ^[dynamic]ArgumentPair) {
+	for &a in ap^ {
+		if len(a.key) > 0 do delete_string(a.key)
+		if len(a.value) > 0 do delete_string(a.value)
+	}
+	delete(ap^)
 }
 
 print_help :: proc() {
@@ -90,12 +102,24 @@ main :: proc() {
 	}
 
 	ap := make([dynamic]ArgumentPair)
-	defer delete(ap)
+	defer free_argument_pairs(&ap)
 
 	c := init_config()
 	if c == nil do os.exit(1)
 	defer free_config(c)
-	for ck in c.keys do if len(ck.name) > 0 && len(ck.value) > 0 do if !slice.contains(ap[:], lazy_convert(ck)) do append(&ap, lazy_convert(ck))
+
+	for &ck in c.keys {
+		if len(ck.name) == 0 || len(ck.value) == 0 do continue
+
+		duplicate := false
+		for existing in ap {
+			if existing.key == ck.name && existing.value == ck.value {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate do append(&ap, lazy_convert(ck))
+	}
 
 	td := init_template_data(c)
 	if td == nil do os.exit(1)
@@ -135,7 +159,7 @@ main :: proc() {
 				for x in s do delete_string(x)
 				delete(s)
 			}
-			for a in ap do if a.source == .CONFIG do append(&s, fmt.aprintf("%s = %s", a.key, a.value))
+			for &a in ap do if a.source == .CONFIG do append(&s, fmt.aprintf("%s = %s", a.key, a.value))
 			if len(s) == 0 {
 				fmt.printfln("No Keys with assigned Values in Config file")
 				return
@@ -148,7 +172,7 @@ main :: proc() {
 		case "-l", "--list", "list":
 			arg = arg[1:]
 			if len(arg) == 0 {
-				for t in td.data do fmt.printfln("Name: %s\n Keys -> %v", os.base(t.filepath), t.keys)
+				for &t in td.data do fmt.printfln("Name: %s\n Keys -> %v", os.base(t.filepath), t.keys)
 				return
 			}
 			if idx, ok := valid_template_name(arg[0], td); !ok {
@@ -187,7 +211,7 @@ main :: proc() {
 				keys := make([dynamic]string)
 				defer delete(keys)
 
-				for t in td.data do for k in t.keys {
+				for &t in td.data do for k in t.keys {
 					if unique {
 						if !slice.contains(keys[:], k) do append(&keys, k)
 					} else do append(&keys, k)
@@ -229,8 +253,25 @@ main :: proc() {
 			key := arg[0]
 			value := arg[1]
 
-			if idx, ok := key_in_arg_pair(key, &ap); ok do unordered_remove(&ap, idx)
-			append(&ap, ArgumentPair{key = key, value = value})
+			i := 0
+			for i < len(ap) {
+				if ap[i].key == key {
+					if len(ap[i].key) > 0 do delete_string(ap[i].key)
+					if len(ap[i].value) > 0 do delete_string(ap[i].value)
+					unordered_remove(&ap, i)
+				} else {
+					i += 1
+				}
+			}
+
+			append(
+				&ap,
+				ArgumentPair {
+					key = strings.clone(key),
+					value = strings.clone(value),
+					source = .PARAM,
+				},
+			)
 			arg = arg[2:]
 
 		case:
@@ -249,7 +290,7 @@ main :: proc() {
 			"[ERROR] Invalid template name: %s\nFound following templates:",
 			template_name,
 		)
-		for t in td.data do fmt.printfln("  %s", os.base(t.filepath))
+		for &t in td.data do fmt.printfln("  %s", os.base(t.filepath))
 		os.exit(1)
 	} else {
 		tf, tf_err := os.stat(td.data[idx].filepath, context.allocator)
@@ -262,10 +303,18 @@ main :: proc() {
 		missing_keys := make([dynamic]string)
 		defer delete(missing_keys)
 
-		for tk in template_keys do if idx, ok := key_in_arg_pair(tk, &ap); !ok do append(&missing_keys, tk)
+		for &tk in template_keys do if idx, ok := key_in_arg_pair(tk, &ap); !ok do append(&missing_keys, tk)
 		if len(missing_keys) > 0 {
 			for m in missing_keys do fmt.eprintfln("Missing value for key: %s", m)
 			os.exit(1)
+		}
+
+		for &a in ap {
+			v, ok := evaluate_special_value(a.value, c, &ap, &td.data[idx], td)
+			if !ok do continue
+			if len(a.value) > 0 do delete_string(a.value)
+			a.value = v
+			fmt.printfln("TEST: Key %s got value -> %s from %v", a.key, a.value, a.source)
 		}
 
 		if !encode_validated_template(&ap, &td.data[idx], td.name_override) do os.exit(1)
