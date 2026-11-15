@@ -24,6 +24,148 @@ valid_template_name :: proc(t: string, td: ^Template_Data) -> (idx: int, ok: boo
 	return 0, false
 }
 
+is_ascii_alpha :: proc(ch: u8) -> bool {
+	return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z')
+}
+
+is_key_char :: proc(ch: u8) -> bool {
+	return is_ascii_alpha(ch) || (ch >= '0' && ch <= '9') || ch == '_'
+}
+
+@(private = "file")
+// Resolve one complete $key or %special token. Returned strings are allocated
+resolve_special_token :: proc(
+	token: string,
+	c: ^Config,
+	ap: ^[dynamic]ArgumentPair,
+	t: ^Template,
+	td: ^Template_Data,
+) -> (
+	value: string,
+	ok: bool,
+) {
+	if len(token) < 2 do return "", false
+
+	switch token[0] {
+	case '$':
+		key := token[1:]
+		if idx, found := key_in_arg_pair(key, ap); found {
+			return strings.clone(ap[idx].value), true
+		}
+		return "", false
+
+	case '%':
+		special := strings.to_lower(token[1:])
+		defer delete_string(special)
+
+		switch special {
+		case "b", "p":
+			wd, err := os.get_working_directory(context.allocator)
+			if err != nil do fmt.panicf("Failed get_working_directory() -> %v", err)
+			defer delete_string(wd)
+			if special == "p" do return strings.clone(wd), true
+			return strings.clone(os.base(wd)), true
+
+		case "d", "t", "dt":
+			ts := time.now()
+			switch special {
+			case "d":
+				b: [time.MIN_YYYY_DATE_LEN]u8
+				return strings.clone(time.to_string_dd_mm_yyyy(ts, b[:])), true
+			case "t":
+				b: [time.MIN_HMS_LEN]u8
+				return strings.clone(time.time_to_string_hms(ts, b[:])), true
+			case "dt":
+				db: [time.MIN_YYYY_DATE_LEN]u8
+				tb: [time.MIN_HMS_LEN]u8
+				d := time.to_string_dd_mm_yyyy(ts, db[:])
+				time_text := time.time_to_string_hms(ts, tb[:])
+				return fmt.aprintf("%s %s", d, time_text), true
+			}
+
+		case "n":
+			if len(td.name_override) == 0 do return strings.clone(os.base(t.filepath)), true
+			return strings.clone(td.name_override), true
+		}
+	}
+
+	return "", false
+}
+
+@(private = "file")
+// Expand $key references recursively before resolving any %special tokens.
+// This allows config values to compose other config values, e.g. path = %p/$bin
+// while bin = %n. Cyclic references are rejected.
+expand_key_references :: proc(
+	val: string,
+	ap: ^[dynamic]ArgumentPair,
+	key_stack: ^[dynamic]string,
+) -> (
+	value: string,
+	ok: bool,
+) {
+	if len(val) == 0 do return strings.clone(""), true
+
+	parts := make([dynamic]string)
+	owned := make([dynamic]string)
+	defer {
+		for part in owned do delete_string(part)
+		delete(owned)
+		delete(parts)
+	}
+
+	i := 0
+	literal_start := 0
+	for i < len(val) {
+		if val[i] != '$' {
+			i += 1
+			continue
+		}
+
+		token_end := i + 1
+		key := ""
+		if token_end < len(val) && val[token_end] == '{' {
+			close := token_end + 1
+			for close < len(val) && val[close] != '}' do close += 1
+			if close >= len(val) || close == token_end + 1 do return "", false
+			key = val[token_end + 1:close]
+			token_end = close + 1
+		} else {
+			for token_end < len(val) && is_key_char(val[token_end]) do token_end += 1
+			if token_end == i + 1 {
+				i += 1
+				continue
+			}
+			key = val[i + 1:token_end]
+		}
+
+		if i > literal_start do append(&parts, val[literal_start:i])
+
+		for existing in key_stack^ {
+			if existing == key do return "", false
+		}
+
+		idx, found := key_in_arg_pair(key, ap)
+		if !found do return "", false
+
+		append(key_stack, key)
+		resolved, resolved_ok := expand_key_references(ap[idx].value, ap, key_stack)
+		unordered_remove(key_stack, len(key_stack^) - 1)
+		if !resolved_ok do return "", false
+
+		append(&parts, resolved)
+		append(&owned, resolved)
+
+		i = token_end
+		literal_start = i
+	}
+
+	if literal_start < len(val) do append(&parts, val[literal_start:])
+	return strings.concatenate(parts[:], context.allocator), true
+}
+
+// Compose literal text and %special references after recursively expanding
+// every $key reference. Returned strings are allocated.
 evaluate_special_value :: proc(
 	val: string,
 	c: ^Config,
@@ -34,56 +176,53 @@ evaluate_special_value :: proc(
 	value: string,
 	ok: bool,
 ) {
-	if len(val) == 0 do return "", false
+	key_stack := make([dynamic]string)
+	defer delete(key_stack)
 
-	v: string
-	switch val[0] {
-	case u8('$'):
-		v = val[1:]
-		if len(v) == 0 do return "", false
-		if idx, kok := key_in_arg_pair(v, ap); kok do return strings.clone(ap[idx].value), true
-		return "", false
+	expanded, expanded_ok := expand_key_references(val, ap, &key_stack)
+	if !expanded_ok do return "", false
+	defer delete_string(expanded)
 
-	case u8('%'):
-		v = strings.to_lower(val[1:])
-		defer delete_string(v)
-		if len(v) == 0 do return "", false
-		switch v {
-		case "b", "p":
-			wd, e := os.get_working_directory(context.allocator)
-			if e != nil do fmt.panicf("Failed get_working_directory() -> %v", e)
-			defer delete_string(wd)
-			if v == "p" do return strings.clone(wd), true
-			else do return strings.clone(os.base(wd)), true
+	if len(expanded) == 0 do return strings.clone(""), true
 
-		case "d", "t", "dt":
-			ts := time.now()
-			switch v {
-			case "d":
-				b: [time.MIN_YYYY_DATE_LEN]u8
-				return strings.clone(time.to_string_dd_mm_yyyy(ts, b[:])), true
-			case "t":
-				b: [time.MIN_HMS_LEN]u8
-				return strings.clone(time.time_to_string_hms(ts, b[:])), true
-			case "dt":
-				db: [time.MIN_YYYY_DATE_LEN]u8
-				tb: [time.MIN_HMS_LEN]u8
-
-				d := time.to_string_dd_mm_yyyy(ts, db[:])
-				t := time.time_to_string_hms(ts, tb[:])
-				return fmt.aprintf("%s %s", d, t), true
-			}
-
-		case "n":
-			if len(td.name_override) == 0 do return strings.clone(os.base(t.filepath)), true
-			return strings.clone(td.name_override), true
-
-		case:
-			return "", false
-		}
+	parts := make([dynamic]string)
+	owned := make([dynamic]string)
+	defer {
+		for part in owned do delete_string(part)
+		delete(owned)
+		delete(parts)
 	}
 
-	return "", false
+	i := 0
+	literal_start := 0
+	for i < len(expanded) {
+		if expanded[i] != '%' {
+			i += 1
+			continue
+		}
+
+		token_end := i + 1
+		for token_end < len(expanded) && is_ascii_alpha(expanded[token_end]) do token_end += 1
+		if token_end == i + 1 {
+			i += 1
+			continue
+		}
+
+		if i > literal_start do append(&parts, expanded[literal_start:i])
+
+		token := expanded[i:token_end]
+		resolved, found := resolve_special_token(token, c, ap, t, td)
+		if !found do return "", false
+
+		append(&parts, resolved)
+		append(&owned, resolved)
+
+		i = token_end
+		literal_start = i
+	}
+
+	if literal_start < len(expanded) do append(&parts, expanded[literal_start:])
+	return strings.concatenate(parts[:], context.allocator), true
 }
 
 // Returns allocated file keys
@@ -288,9 +427,7 @@ encode_template_file :: proc(
 		if was_replaced {
 			append(&new_data, new_line)
 			delete_string(new_line)
-		} else {
-			append(&new_data, line)
-		}
+		} else do append(&new_data, line)
 
 		append(&new_data, "\n")
 
@@ -347,10 +484,7 @@ encode_file_recursive :: proc(
 				return false
 			}
 			defer delete_string(child_output)
-
-			if !encode_file_recursive(a, x, child_output) {
-				return false
-			}
+			if !encode_file_recursive(a, x, child_output) do return false
 		}
 
 	case:

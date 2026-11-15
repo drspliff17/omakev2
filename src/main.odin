@@ -259,9 +259,7 @@ main :: proc() {
 					if len(ap[i].key) > 0 do delete_string(ap[i].key)
 					if len(ap[i].value) > 0 do delete_string(ap[i].value)
 					unordered_remove(&ap, i)
-				} else {
-					i += 1
-				}
+				} else do i += 1
 			}
 
 			append(
@@ -309,12 +307,31 @@ main :: proc() {
 			os.exit(1)
 		}
 
+		resolved_values := make([dynamic]string)
+		resolved_ok := make([dynamic]bool)
+		defer {
+			for v in resolved_values do if len(v) > 0 do delete_string(v)
+			delete(resolved_values)
+			delete(resolved_ok)
+		}
+
 		for &a in ap {
 			v, ok := evaluate_special_value(a.value, c, &ap, &td.data[idx], td)
-			if !ok do continue
-			if len(a.value) > 0 do delete_string(a.value)
-			a.value = v
-			fmt.printfln("TEST: Key %s got value -> %s from %v", a.key, a.value, a.source)
+			if !ok {
+				fmt.eprintfln("Failed to evaluate special value in key '%s': %s", a.key, a.value)
+				os.exit(1)
+			}
+			append(&resolved_values, v)
+			append(&resolved_ok, true)
+		}
+
+		for &a, i in ap {
+			if resolved_ok[i] {
+				if len(a.value) > 0 do delete_string(a.value)
+				a.value = resolved_values[i]
+				resolved_values[i] = ""
+				fmt.printfln("TEST: Key %s got value -> %s from %v", a.key, a.value, a.source)
+			}
 		}
 
 		if !encode_validated_template(&ap, &td.data[idx], td.name_override) do os.exit(1)
