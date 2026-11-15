@@ -307,6 +307,19 @@ main :: proc() {
 			os.exit(1)
 		}
 
+		if len(td.name_override) > 0 {
+			raw_name := td.name_override
+			td.name_override = ""
+			resolved_name, name_ok := evaluate_special_value(raw_name, c, &ap, &td.data[idx], td)
+			if !name_ok {
+				fmt.eprintfln("Failed to evaluate special value in template name: %s", raw_name)
+				delete_string(raw_name)
+				os.exit(1)
+			}
+			delete_string(raw_name)
+			td.name_override = resolved_name
+		}
+
 		resolved_values := make([dynamic]string)
 		resolved_ok := make([dynamic]bool)
 		defer {
