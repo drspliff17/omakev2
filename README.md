@@ -42,6 +42,32 @@ omake [-n <v>] [-k <n> <v>] <template name>
               Use 'omake -c h' for more information
 ```
 
+## Install / Build
+
+### Installation
+
+#### Linux
+
+- Download the [latest release](https://github.com/drspliff17/omakev2/releases/latest)
+
+Add to ``$PATH``
+
+#### Other OS
+
+- *Must build from source, see below*
+
+### Build
+
+- Requires [Odin Compiler](https://github.com/odin-lang/Odin)
+
+Clone repo, ``cd`` into directory, and run:
+
+```bash
+odin build src -out:omakev2
+```
+
+Add to ``$PATH``
+
 ### Basic Key Substitution
 
 Any ``Template`` file can contain keys, which are denoted by:
