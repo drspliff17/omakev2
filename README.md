@@ -34,7 +34,10 @@ omake [-n <v>] [-k <n> <v>] <template name>
 
 -n <v>     -> Override output clone name
 -k <n> <v> -> Assign a value to a named key
--l         -> List all available templates
+
+-d         -> View config key values
+-l [n]     -> List all available templates && their keys, or,
+              display keys for a given template (by name)
 -c         -> Count templates, has subcmd for variations
               Use 'omake -c h' for more information
 ```

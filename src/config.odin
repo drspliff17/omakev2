@@ -25,24 +25,18 @@ ensure_default_template_directory :: proc(c: ^Config) {
 
 	c.template_dirs = make([]string, 1)
 	c.template_dirs[0] = tp
+	fmt.printfln("[INFO] Assigned template directory: %s", tp)
 }
 
-@(private = "file")
 // Returns allocated string for config file path
 get_config_path :: proc() -> string {
 	h, e := os.user_home_dir(context.allocator)
 	if e != nil do fmt.panicf("Failed to allocate user home path: %v", e)
 	defer delete_string(h)
 
-	when ODIN_DEBUG {
-		c, err := os.join_path({h, ".config", "omake", "config2"}, context.allocator)
-		if err != nil do fmt.panicf("Failed to allocate user config path: %v", err)
-		return c
-	} else {
-		c, err := os.join_path({h, ".config", "omake", "config"}, context.allocator)
-		if err != nil do fmt.panicf("Failed to allocate user config path: %v", err)
-		return c
-	}
+	c, err := os.join_path({h, ".config", "omake", "config"}, context.allocator)
+	if err != nil do fmt.panicf("Failed to allocate user config path: %v", err)
+	return c
 }
 
 @(private = "file")
@@ -99,6 +93,16 @@ validate_config :: proc(p: ^kvp.Parser, c: ^Config) -> bool {
 		defer if len(tk) > 0 do delete(tk)
 
 		for t, i in c.template_dirs {
+			if len(t) == 0 {
+				append(
+					&err,
+					fmt.aprintf(
+						"[ERROR] Invalid template directory path, value empty - template_dir index: %d",
+						i,
+					),
+				)
+				continue
+			}
 
 			if !os.exists(t) {
 				l: int
@@ -139,6 +143,18 @@ validate_config :: proc(p: ^kvp.Parser, c: ^Config) -> bool {
 
 		}
 
+		tfound := false
+		for t in c.template_dirs {
+			if !os.exists(t) do continue
+			fi, e := os.stat(t, context.allocator)
+			if e != nil do fmt.panicf("Failed to stat path: %s -> %v", t, e)
+			defer os.file_info_delete(fi, context.allocator)
+			if fi.size > 0 {
+				tfound = true
+				break
+			}
+		}
+		if !tfound do append(&err, fmt.aprintf("[ERROR] %d Template Directory %s provided, but no templates exist", len(c.template_dirs), len(c.template_dirs) == 1 ? "path" : "paths"))
 	}
 
 	if len(err) == 0 do return true

@@ -6,13 +6,19 @@ import "core:os"
 import "core:slice"
 import "core:strings"
 
+ArgumentSource :: enum {
+	PARAM,
+	CONFIG,
+}
+
 ArgumentPair :: struct {
-	key:   string,
-	value: string,
+	key:    string,
+	value:  string,
+	source: ArgumentSource,
 }
 
 lazy_convert :: proc(a: ConfigKey) -> ArgumentPair {
-	return ArgumentPair{key = a.name, value = a.value}
+	return ArgumentPair{key = a.name, value = a.value, source = .CONFIG}
 }
 
 print_help :: proc() {
@@ -22,13 +28,16 @@ print_help :: proc() {
             omake
 ------------------------------
 Usage:
-omake [-h] [-l] [-c [h] ] [-n name]
-[-k name value] <template name>
+omake [-h] [-d] [-g] [-l [name] ] [-c [opt] ]
+[-n name] [-k name value] <template name>
 
 -h | help
 -g | gen                -> Generate default config
--l | list               -> View valid templates
--c | count [opt]        -> Use 'h' for subcmd
+
+-d | default            -> View config key values
+-l | list  [name]       -> View valid templates
+-c | count [opt]        -> Use 'h' for subcmds
+
 -n | name  <value>      -> Assign Template name
 -k | key <name> <value> -> Define K/V Pair
 
@@ -110,9 +119,47 @@ main :: proc() {
 			if !generate_default_config() do os.exit(1)
 			return
 
+		case "-d", "--default", "default":
+			p := get_config_path()
+			defer delete_string(p)
+			if !os.exists(p) {
+				fmt.eprintfln(
+					"Config file does not exist - keys cannot be assigned a default value.\nExpected file location: %s\nUse 'omake -h' for more information",
+					p,
+				)
+				os.exit(1)
+			}
+
+			s := make([dynamic]string)
+			defer {
+				for x in s do delete_string(x)
+				delete(s)
+			}
+			for a in ap do if a.source == .CONFIG do append(&s, fmt.aprintf("%s = %s", a.key, a.value))
+			if len(s) == 0 {
+				fmt.printfln("No Keys with assigned Values in Config file")
+				return
+			} else {
+				fmt.println("Keys with assigned default values:")
+				for x in s do fmt.printfln(" %s", x)
+				return
+			}
+
 		case "-l", "--list", "list":
-			for t in td.data do fmt.printfln("Name: %s\n Keys -> %v", os.base(t.filepath), t.keys)
-			return
+			arg = arg[1:]
+			if len(arg) == 0 {
+				for t in td.data do fmt.printfln("Name: %s\n Keys -> %v", os.base(t.filepath), t.keys)
+				return
+			}
+			if idx, ok := valid_template_name(arg[0], td); !ok {
+				fmt.eprintfln(
+					"Invalid usage: expected either no arguments, or a valid template name",
+				)
+				os.exit(1)
+			} else {
+				fmt.printfln("Keys -> %v", td.data[idx].keys)
+				return
+			}
 
 		case "-c", "--count", "count":
 			arg = arg[1:]
