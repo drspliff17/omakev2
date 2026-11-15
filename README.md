@@ -17,7 +17,7 @@ $HOME/.config/omake/config
 $HOME/.config/omake/templates
 ```
 
-Any file inside a ``Template Directory`` is considered it's own
+Any file/directory inside a ``Template Directory`` is considered it's own
 ``Template``.
 
 ## Usage
@@ -65,13 +65,25 @@ keys[1].name = ......
 
 - *Note, values assigned with the '-k' flag take precedence over ``Config`` values*
 
+Using the **above example execution**, a template text file containing:
+
+```txt
+Here is some text, replaced with {{key_name}}
+```
+
+Would output:
+
+```txt
+Here is some text, replaced with some key value
+```
+
 ### Template Directories
 
 You can also define additional ``Template Directories``:
 
 ```txt
 template_dirs[0] = /home/you/someplace/templates
-template_dirs[1] = /home/you/nowhere/templates
+template_dirs[1] = ......
 ```
 
 - *Note, default ``Template Directory`` will not be automatically loaded, if
@@ -79,4 +91,4 @@ template_dirs[1] = /home/you/nowhere/templates
 which includes your default ``Template Directory``*
 
 - *Finally, you can also set ``enable_warnings``. This defaults to true in
-the event of no ``Config`` file found, and included when a default is generated*
+the event of no ``Config`` file found, and is included when a default is generated*
