@@ -115,7 +115,8 @@ $name -> Key Reference
 %x    -> Format Flag
 ```
 
-- *Note, These types may be nested, but may **not** be cyclic in nature.*
+- *Note, These types may be nested, but may **not** be cyclic in nature. Value
+formatting may also be used when assigning value to '-n' argument*
 
 A ``Key Reference`` simply inserts the corresponding value of the key ``name`` given.
 The following ``Format Flags`` are available:
