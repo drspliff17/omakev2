@@ -76,10 +76,24 @@ resolve_special_token :: proc(
 			case "dt":
 				db: [time.MIN_YYYY_DATE_LEN]u8
 				tb: [time.MIN_HMS_LEN]u8
-				d := time.to_string_dd_mm_yyyy(ts, db[:])
-				time_text := time.time_to_string_hms(ts, tb[:])
-				return fmt.aprintf("%s %s", d, time_text), true
+				return fmt.aprintf(
+						"%s %s",
+						time.to_string_dd_mm_yyyy(ts, db[:]),
+						time.time_to_string_hms(ts, tb[:]),
+					),
+					true
 			}
+
+		case "h":
+			h, err := os.user_home_dir(context.allocator)
+			if err != nil do return "", false
+			return h, true
+
+		case "u":
+			uk := ODIN_OS == .Windows ? "USERNAME" : "USER"
+			u, f := os.lookup_env(uk, context.allocator)
+			if !f do return "", false
+			return u, true
 
 		case "n":
 			if len(td.name_override) == 0 do return strings.clone(os.base(t.filepath)), true
@@ -447,6 +461,11 @@ encode_file_recursive :: proc(
 
 		if err := os.write_entire_file(output_path, data[:]); err != nil {
 			fmt.eprintfln("Failed to write %s -> %v", output_path, err)
+			return false
+		}
+
+		if err := os.chmod(output_path, f.mode); err != nil {
+			fmt.eprintfln("Failed to apply permissions to %s -> %v", output_path, err)
 			return false
 		}
 

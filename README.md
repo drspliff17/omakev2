@@ -128,6 +128,8 @@ The following ``Format Flags`` are available:
 %n  -> Template Name / Name Override
 %b  -> Base of Working Directory
 %p  -> Full Working Directory
+%h  -> User Home Directory
+%u  -> Username
 ```
 
 - *Note, if you would like to join multiple values, without a separating
